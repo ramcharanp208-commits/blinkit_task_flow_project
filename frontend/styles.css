@@ -1,0 +1,284 @@
+/* --- GLOBAL RESETS & BOX MODEL --- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f4f6f8;
+  color: #1a1a1a;
+  line-height: 1.5;
+  padding-bottom: 2rem;
+}
+
+/* --- HEADER --- */
+.app-header {
+  background-color: #0c831f; /* Blinkit Green */
+  color: #ffffff;
+  padding: 1.25rem 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.header-container h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.header-container .subtitle {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+/* --- MAIN CONTAINER --- */
+.main-content {
+  max-width: 900px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+}
+
+/* --- STICKY FORM CARD --- */
+.task-form-card {
+  position: sticky;
+  top: 1rem;
+  z-index: 100;
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.task-form-card h2 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.85rem;
+}
+
+.form-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: #555;
+}
+
+.form-group input,
+.form-group select {
+  padding: 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #0c831f;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+}
+
+.error-message {
+  color: #d32f2f;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+  font-weight: 600;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+/* --- BUTTONS --- */
+.btn {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.btn-primary {
+  background-color: #0c831f;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #096718;
+}
+
+.btn-secondary {
+  background-color: #f0f0f0;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+.btn-secondary:hover {
+  background-color: #e0e0e0;
+}
+
+.btn-small {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  background-color: #e8f5e9;
+  color: #0c831f;
+  border: 1px solid #a5d6a7;
+}
+
+.btn-danger {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.btn-danger:hover {
+  background-color: #ffcdd2;
+}
+
+/* --- TASK LIST SECTION --- */
+.task-list-section {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.25rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+}
+
+.task-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* --- INDIVIDUAL TASK ITEM CARD --- */
+.task-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e0e0e0;
+  border-left: 5px solid #ccc;
+  border-radius: 4px;
+  background-color: #fafafa;
+}
+
+.task-card.priority-high {
+  border-left-color: #d32f2f;
+}
+
+.task-card.priority-medium {
+  border-left-color: #f57c00;
+}
+
+.task-card.priority-low {
+  border-left-color: #388e3c;
+}
+
+.task-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.task-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #222;
+}
+
+.task-meta {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.task-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* --- RESPONSIVE BREAKPOINTS (REQUIRED) --- */
+
+/* Breakpoint 1: Tablet / Small Screen (< 768px) */
+@media screen and (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Breakpoint 2: Mobile Screen (< 480px) */
+@media screen and (max-width: 480px) {
+  .main-content {
+    padding: 0 0.5rem;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .task-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .task-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* --- STATUS BANNER --- */
+.status-banner {
+  padding: 0.6rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-banner.info {
+  background-color: #e3f2fd;
+  color: #0d47a1;
+  border: 1px solid #90caf9;
+}
+
+.status-banner.error {
+  background-color: #ffebee;
+  color: #b71c1c;
+  border: 1px solid #ef9a9a;
+}
+
+/* --- EMPTY STATE --- */
+.empty-message {
+  color: #777;
+  padding: 1rem 0;
+  font-style: italic;
+}
