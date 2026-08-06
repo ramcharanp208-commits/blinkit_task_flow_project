@@ -430,6 +430,8 @@ Reason: input is whitespace-only → early return path; title falls back to plac
 
 ## 7. Git Workflow
 
+Branch: `feature/complete-taskflow` → merged into `main`.
+
 The repository's commit history includes at least one feature branch created,
 committed to at least twice, and merged back into `main`.
 
