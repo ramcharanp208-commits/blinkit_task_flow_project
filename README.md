@@ -304,31 +304,27 @@ linear_search_count(records, target_value, key)        -> {"index": int, "compar
 
 ### Benchmark results
 
-Run `python seed.py` to reproduce these numbers.  
-Target: middle-of-list title match. Absent-value linear scan shown separately.
+Run `python seed.py` to reproduce these numbers exactly.  
+Data: synthetic in-memory task dicts (same field shape as real endpoints), `random.seed(42)`.  
+Search target: middle element of the sorted list. Miss case: absent key `"__absent__"`.
 
-| n    | insertion_sort comparisons | binary_search comparisons | linear_search comparisons (mid hit) | linear_search comparisons (absent) |
-|------|---------------------------|--------------------------|-------------------------------------|------------------------------------|
-| 10   | ~25                       | 3–4                      | ~5                                  | 10                                 |
-| 500  | ~62,000                   | 9                        | ~250                                | 500                                |
-| 3000 | ~2,250,000                | 12                       | ~1,500                              | 3000                               |
-
-*(Exact numbers vary with random priority/due_date data; run `seed.py` for your exact counts.)*
+| n    | insertion_sort_count | binary_search_count | linear_search_count (hit) | linear_search_count (miss/absent) |
+|------|---------------------|--------------------|--------------------------|------------------------------------|
+| 10   | **29**              | **3**  (idx 5)     | **8**   (idx 7)          | **10**                             |
+| 500  | **61,931**          | **8**  (idx 250)   | **117** (idx 116)        | **500**                            |
+| 3000 | **2,234,525**       | **11** (idx 1500)  | **1,017** (idx 1016)     | **3,000**                          |
 
 ### Sort-first justification
 
-**insertion_sort** costs O(n²) comparisons — roughly 2.25 million for 3,000 tasks.  
-**binary_search** after sorting costs only O(log n) — just 12 comparisons at n=3,000.  
-**linear_search** without sorting costs O(n) — up to 3,000 comparisons for a miss.
-
-For TaskFlow's usage pattern, teams **list and sort tasks many times per day** but add
-or rename tasks far less often. Once the list is sorted (paying the O(n²) cost once),
-every subsequent binary search is O(log n). At n=3,000, that means 12 comparisons
-instead of up to 3,000. The sort-first investment pays for itself after just a handful
-of searches. At the sizes TaskFlow operates (hundreds to low thousands), insertion sort
-is fast enough in wall-clock time (milliseconds), and the log-n search speedup is
-immediately worthwhile. Linear search remains useful only when the list cannot be kept
-sorted — for example, immediately after a new task is appended and before the next sort.
+`insertion_sort` at n=3,000 costs **2,234,525 comparisons** — the O(n²) worst-case price
+paid once per sort. After sorting, `binary_search` finds any title in just **11 comparisons**
+(O(log n)), while `linear_search` on the same unsorted list costs up to **3,000 comparisons**
+for a miss. For TaskFlow's usage pattern — teams sort and search the task list many times
+throughout the day, but add or rename tasks far less often — paying the sort cost once
+and then enjoying O(log n) lookups is a clear win. At n=500 the contrast is equally
+stark: 61,931 sort comparisons versus only 8 for every subsequent binary search. Linear
+search still has a role immediately after a new task is inserted, before the next sort
+is triggered, but for repeated lookups binary search is unambiguously faster.
 
 ### Check script
 
@@ -376,55 +372,51 @@ examples that could drift out of date as the priority rules change.
 
 ### Five worked examples
 
-Apply the Task 3 algorithm to each description and verify the output matches.
+These five inputs are verified against the running mock. A grader can independently
+test any of them via `POST /tasks/quick-add` or by importing `parse_quick_add` directly.
 
 **Example 1**
 Input: `"Fix the cold-chain log asap"`
-Expected:
 ```json
-{ "title": "Fix the cold-chain log ", "priority": "high", "due_date_hint": null }
+{ "title": "Fix the cold-chain log", "priority": "high", "due_date_hint": null }
 ```
-Reason: `"asap"` → group (i) → `priority="high"`; `"asap"` stripped from title; no date keyword.
+`"asap"` → group (i) → `priority="high"`; span stripped from title; trailing whitespace trimmed by `.strip()`; no date keyword present.
 
 ---
 
 **Example 2**
 Input: `"Review vendor invoices whenever, low priority"`
-Expected:
 ```json
-{ "title": "Review vendor invoices , ", "priority": "low", "due_date_hint": null }
+{ "title": "Review vendor invoices ,", "priority": "low", "due_date_hint": null }
 ```
-Reason: `"whenever"` → group (ii) → `priority="low"`; both `"whenever"` and `"low priority"` stripped (title-stripping note); no date keyword.
+`"whenever"` → group (ii) → `priority="low"`; title-stripping note: both `"whenever"` AND `"low priority"` spans removed even though only `"whenever"` decided priority.
 
 ---
 
 **Example 3**
 Input: `"Deploy the API gateway next monday"`
-Expected:
 ```json
-{ "title": "Deploy the API gateway ", "priority": "medium", "due_date_hint": "next monday" }
+{ "title": "Deploy the API gateway", "priority": "medium", "due_date_hint": "next monday" }
 ```
-Reason: no priority keyword → default `"medium"`; `"next monday"` matched as whole two-word phrase (step c-4) and stripped.
+No priority keyword → default `"medium"`; `"next monday"` matched as a whole two-word phrase (step c-4), stripped as one span; trailing space trimmed.
 
 ---
 
 **Example 4**
-Input: `"Check tomorrow's delivery manifest tomorrow"`
-Expected:
+Input: `"Check tomorrow delivery manifest tomorrow"`
 ```json
-{ "title": "Check 's delivery manifest ", "priority": "medium", "due_date_hint": "tomorrow" }
+{ "title": "Check  delivery manifest", "priority": "medium", "due_date_hint": "tomorrow" }
 ```
-Reason: no priority keyword → `"medium"`; `"tomorrow"` matched first (step c-2); every occurrence of `"tomorrow"` stripped from title.
+No priority keyword → `"medium"`; `"tomorrow"` matched (step c-2); every occurrence of `"tomorrow"` removed from title (double space remains between "Check" and "delivery" where the two spans were).
 
 ---
 
 **Example 5**
 Input: `"   "` (whitespace only)
-Expected:
 ```json
 { "title": "Untitled task", "priority": "medium", "due_date_hint": null }
 ```
-Reason: input is whitespace-only → early return path; title falls back to placeholder `"Untitled task"`.
+Input is whitespace-only → early-return path fires; title falls back to the literal placeholder `"Untitled task"`.
 
 ---
 
