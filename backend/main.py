@@ -1,80 +1,114 @@
 import time
 import logging
 from typing import List, Optional
+
 from fastapi import FastAPI, Depends, HTTPException, Request, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
+from backend.auth import (
+    hash_password, verify_password, create_access_token, get_current_user,
+)
 from backend.ai_parser import parse_quick_add
-from backend.schemas import QuickAddRequest
 from backend.database import Base, engine
 from backend.dependencies import get_db
 from backend.models import User, Project, Task
 from backend.algorithms import insertion_sort, binary_search, linear_search
 from backend.schemas import (
+    RegisterRequest, LoginRequest, TokenResponse,
     UserCreate, UserResponse,
     ProjectCreate, ProjectResponse, ProjectStatResponse,
     TaskCreate, TaskUpdate, TaskResponse,
+    QuickAddRequest,
 )
 
-# Initialize database tables
+# ── Init DB ───────────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="TaskFlow API", version="1.0.0")
+app = FastAPI(title="TaskFlow API", version="2.0.0")
 
-# Setup Console Logger
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("taskflow_middleware")
+logger = logging.getLogger("taskflow")
 
-# -----------------------------------------------------------------------
-# CORS MIDDLEWARE  (Task 8 – explicit origins, never unconditional wildcard)
-# Allows both the Python http.server origin AND VS Code Live Server origin.
-# allow_credentials must be False when using wildcard; here we name origins
-# explicitly so credentials can stay False without ambiguity.
-# -----------------------------------------------------------------------
+# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000",
+        "http://127.0.0.1:5500", "http://localhost:5500",
+        "http://127.0.0.1:5501", "http://localhost:5501",
+        "http://127.0.0.1:8080", "http://localhost:8080",
+        "http://127.0.0.1:3000", "http://localhost:3000",
     ],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
-# -----------------------------------------------------------------------
-# CUSTOM LOGGING MIDDLEWARE  (Task 7)
-# -----------------------------------------------------------------------
+# ── Logging middleware ────────────────────────────────────────────────────────
 @app.middleware("http")
 async def log_request_time(request: Request, call_next):
-    start_time = time.time()
+    start = time.time()
     response = await call_next(request)
-    process_time = (time.time() - start_time) * 1000
-    logger.info(
-        "Method: %s  Path: %s  Completed in: %.2fms  Status: %s",
-        request.method,
-        request.url.path,
-        process_time,
-        response.status_code,
-    )
+    ms = (time.time() - start) * 1000
+    logger.info("%s %s  %.2fms  %s", request.method, request.url.path, ms, response.status_code)
     return response
 
 
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user and return a JWT token immediately."""
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user = User(
+        email=payload.email,
+        name=payload.name,
+        hashed_password=hash_password(payload.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token({"sub": str(user.id)})
+    return TokenResponse(
+        access_token=token,
+        user_id=user.id,
+        user_name=user.name,
+        email=user.email,
+    )
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    """Login with email + password, receive a JWT token."""
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user or not user.hashed_password or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token({"sub": str(user.id)})
+    return TokenResponse(
+        access_token=token,
+        user_id=user.id,
+        user_name=user.name,
+        email=user.email,
+    )
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def me(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user's profile."""
+    return current_user
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # USER ENDPOINTS
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
+    if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     new_user = User(email=user.email, name=user.name)
     db.add(new_user)
@@ -83,20 +117,26 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 
-@app.get("/users", response_model=List[UserResponse], status_code=status.HTTP_200_OK)
-def get_users(db: Session = Depends(get_db)):
+@app.get("/users", response_model=List[UserResponse])
+def get_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     return db.query(User).all()
 
 
-# ==========================================
-# PROJECT ENDPOINTS & STATS
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════════════
+# PROJECT ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == project.owner_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Project owner (User) not found")
+def create_project(
+    project: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not db.query(User).filter(User.id == project.owner_id).first():
+        raise HTTPException(status_code=404, detail="User not found")
     new_project = Project(title=project.title, owner_id=project.owner_id)
     db.add(new_project)
     db.commit()
@@ -104,27 +144,33 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     return new_project
 
 
-@app.get("/projects", response_model=List[ProjectResponse], status_code=status.HTTP_200_OK)
-def get_projects(db: Session = Depends(get_db)):
-    return db.query(Project).all()
+@app.get("/projects", response_model=List[ProjectResponse])
+def get_projects(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return db.query(Project).filter(Project.owner_id == current_user.id).all()
 
 
-@app.get("/projects/stats", response_model=List[ProjectStatResponse], status_code=status.HTTP_200_OK)
-def get_project_stats(db: Session = Depends(get_db)):
-    """
-    Per-project task statistics computed with SQL COUNT + GROUP BY through
-    SQLAlchemy over an OUTER JOIN of projects and tasks (Task 5).
-    """
+@app.get("/projects/stats", response_model=List[ProjectStatResponse])
+def get_project_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     results = (
         db.query(
             Project.id.label("project_id"),
             Project.title.label("project_title"),
             func.count(Task.id).label("total_tasks"),
-            func.count(case((Task.priority == "low", 1))).label("low_priority_count"),
+            func.count(case((Task.priority == "low",    1))).label("low_priority_count"),
             func.count(case((Task.priority == "medium", 1))).label("medium_priority_count"),
-            func.count(case((Task.priority == "high", 1))).label("high_priority_count"),
+            func.count(case((Task.priority == "high",   1))).label("high_priority_count"),
+            func.count(case((Task.status == "todo",        1))).label("todo_count"),
+            func.count(case((Task.status == "in_progress", 1))).label("in_progress_count"),
+            func.count(case((Task.status == "done",        1))).label("done_count"),
         )
         .outerjoin(Task, Project.id == Task.project_id)
+        .filter(Project.owner_id == current_user.id)
         .group_by(Project.id, Project.title)
         .all()
     )
@@ -136,23 +182,34 @@ def get_project_stats(db: Session = Depends(get_db)):
             low_priority_count=r.low_priority_count,
             medium_priority_count=r.medium_priority_count,
             high_priority_count=r.high_priority_count,
+            todo_count=r.todo_count,
+            in_progress_count=r.in_progress_count,
+            done_count=r.done_count,
         )
         for r in results
     ]
 
 
-# ==========================================
-# TASK CRUD ENDPOINTS
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════════════
+# TASK ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
-def create_task(task: TaskCreate, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == task.project_id).first()
+def create_task(
+    task: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(
+        Project.id == task.project_id,
+        Project.owner_id == current_user.id,
+    ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     new_task = Task(
         title=task.title,
         priority=task.priority,
+        status=task.status,
         due_date=task.due_date,
         project_id=task.project_id,
     )
@@ -162,26 +219,36 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     return new_task
 
 
-@app.get("/tasks", response_model=List[TaskResponse], status_code=status.HTTP_200_OK)
+@app.get("/tasks", response_model=List[TaskResponse])
 def get_tasks(
-    sort: Optional[str] = Query(None, description="Sort field: 'priority'"),
+    sort:       Optional[str] = Query(None, description="'priority' to sort by priority"),
+    project_id: Optional[int] = Query(None, description="Filter by project id"),
+    priority:   Optional[str] = Query(None, pattern="^(low|medium|high)$"),
+    task_status: Optional[str] = Query(None, alias="status", pattern="^(todo|in_progress|done)$"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Lists all tasks.  When sort=priority is provided the list is ordered by
-    custom insertion_sort (low=1, medium=2, high=3) — never by SQL ORDER BY
-    or Python built-in sort.  (Section 2 Task 4)
+    List tasks with optional filters (project_id, priority, status) and
+    optional insertion_sort by priority.
     """
-    db_tasks = db.query(Task).all()
+    query = db.query(Task).join(Project).filter(Project.owner_id == current_user.id)
+
+    if project_id:
+        query = query.filter(Task.project_id == project_id)
+    if priority:
+        query = query.filter(Task.priority == priority)
+    if task_status:
+        query = query.filter(Task.status == task_status)
+
+    db_tasks = query.all()
 
     if sort == "priority":
         priority_map = {"low": 1, "medium": 2, "high": 3}
         task_dicts = [
             {
-                "id": t.id,
-                "title": t.title,
-                "priority": t.priority,
-                "due_date": t.due_date,
+                "id": t.id, "title": t.title, "priority": t.priority,
+                "status": t.status, "due_date": t.due_date,
                 "project_id": t.project_id,
                 "_rank": priority_map.get(str(t.priority), 2),
             }
@@ -195,30 +262,21 @@ def get_tasks(
     return db_tasks
 
 
-# NOTE: /tasks/search MUST be defined before /tasks/{task_id} so FastAPI
-# does not interpret the literal string "search" as an integer task_id.
-@app.get("/tasks/search", response_model=TaskResponse, status_code=status.HTTP_200_OK)
+# /tasks/search MUST come before /tasks/{task_id}
+@app.get("/tasks/search", response_model=TaskResponse)
 def search_task_by_title(
-    title: str = Query(..., description="Exact title to match"),
-    algo: str = Query("binary", pattern="^(binary|linear)$"),
+    title: str = Query(...),
+    algo:  str = Query("binary", pattern="^(binary|linear)$"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Builds an in-memory index from real tasks then finds the exact title match
-    using binary_search (after insertion_sort) or linear_search.  (Section 2 Task 4)
-    """
-    db_tasks = db.query(Task).all()
+    db_tasks = db.query(Task).join(Project).filter(Project.owner_id == current_user.id).all()
     if not db_tasks:
-        raise HTTPException(status_code=404, detail="No tasks in database")
+        raise HTTPException(status_code=404, detail="No tasks found")
 
     task_index = [
-        {
-            "id": t.id,
-            "title": t.title,
-            "priority": t.priority,
-            "due_date": t.due_date,
-            "project_id": t.project_id,
-        }
+        {"id": t.id, "title": t.title, "priority": t.priority,
+         "status": t.status, "due_date": t.due_date, "project_id": t.project_id}
         for t in db_tasks
     ]
 
@@ -229,22 +287,34 @@ def search_task_by_title(
         found = linear_search(task_index, target_value=title, key="title")
 
     if found == -1:
-        raise HTTPException(status_code=404, detail=f"Task with title '{title}' not found")
-
+        raise HTTPException(status_code=404, detail=f"Task '{title}' not found")
     return task_index[found]
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse, status_code=status.HTTP_200_OK)
-def get_task_by_id(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+@app.get("/tasks/{task_id}", response_model=TaskResponse)
+def get_task_by_id(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = db.query(Task).join(Project).filter(
+        Task.id == task_id, Project.owner_id == current_user.id,
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
 
-@app.put("/tasks/{task_id}", response_model=TaskResponse, status_code=status.HTTP_200_OK)
-def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+@app.put("/tasks/{task_id}", response_model=TaskResponse)
+def update_task(
+    task_id: int,
+    task_update: TaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = db.query(Task).join(Project).filter(
+        Task.id == task_id, Project.owner_id == current_user.id,
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     for key, value in task_update.model_dump(exclude_unset=True).items():
@@ -254,62 +324,76 @@ def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get
     return task
 
 
+@app.patch("/tasks/{task_id}/complete", response_model=TaskResponse)
+def toggle_task_complete(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Toggle task status: todo → in_progress → done → todo (cycle).
+    Interview talking point: PATCH semantics for partial update.
+    """
+    task = db.query(Task).join(Project).filter(
+        Task.id == task_id, Project.owner_id == current_user.id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    cycle = {"todo": "in_progress", "in_progress": "done", "done": "todo"}
+    task.status = cycle.get(task.status, "todo")
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 @app.delete("/tasks/{task_id}", status_code=status.HTTP_200_OK)
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = db.query(Task).join(Project).filter(
+        Task.id == task_id, Project.owner_id == current_user.id,
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     db.delete(task)
     db.commit()
-    return {"message": f"Task {task_id} deleted successfully"}
+    return {"message": f"Task {task_id} deleted"}
 
 
-# ==========================================
-# AI QUICK-ADD ENDPOINT  (Section 3)
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════════════
+# AI QUICK-ADD
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/tasks/quick-add", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
-def quick_add_task(payload: QuickAddRequest, db: Session = Depends(get_db)):
-    """
-    Accepts free-text description + project_id.  Uses the deterministic
-    rule-based mock parser (Section 3 Task 3) to derive title, priority,
-    and due_date, then persists a real row in the tasks table.
-    """
-    # Validate project exists before doing anything else
-    project = db.query(Project).filter(Project.id == payload.project_id).first()
+def quick_add_task(
+    payload: QuickAddRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(
+        Project.id == payload.project_id,
+        Project.owner_id == current_user.id,
+    ).first()
     if not project:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Project with id {payload.project_id} does not exist",
+            detail=f"Project {payload.project_id} not found",
         )
 
-    # Role-based prompt structure (Section 3 Task 2) – kept even for the mock
-    _messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an AI task assistant. Extract task 'title', "
-                "'priority' ('low'|'medium'|'high'), and 'due_date_hint' "
-                "from the user description."
-            ),
-        },
-        {"role": "user", "content": payload.description},
-    ]
-
-    # Deterministic mock parser (always active; real LLM path is optional/off)
     parsed = parse_quick_add(payload.description)
-
-    # Validate parsed output via Pydantic before writing to DB
     task_in = TaskCreate(
         title=parsed["title"],
         priority=parsed["priority"],
         due_date=parsed["due_date_hint"],
         project_id=payload.project_id,
     )
-
     new_task = Task(
         title=task_in.title,
         priority=task_in.priority,
+        status="todo",
         due_date=task_in.due_date,
         project_id=task_in.project_id,
     )

@@ -1,102 +1,264 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TaskFlow — Blinkit Ops Dashboard</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskFlow — Blinkit Ops</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
-  <!-- Header (position: sticky applied in CSS) -->
-  <header class="app-header">
-    <div class="header-container">
-      <h1>TaskFlow</h1>
-      <p class="subtitle">Blinkit Operations &amp; Engineering Pod</p>
+<!-- ══════════════════════════════════════════════════
+     AUTH VIEW  (login / register)
+══════════════════════════════════════════════════ -->
+<div id="authView">
+  <div class="auth-card">
+    <div class="brand">
+      <h1>⚡ TaskFlow</h1>
+      <p>Blinkit Operations &amp; Engineering</p>
     </div>
-  </header>
 
-  <main class="main-content">
+    <!-- Tab switcher -->
+    <div class="auth-tabs" role="tablist">
+      <button class="auth-tab active" id="tabLogin"    role="tab" aria-selected="true">Login</button>
+      <button class="auth-tab"        id="tabRegister" role="tab" aria-selected="false">Register</button>
+    </div>
 
-    <!-- ── Create / Quick-Add Task Panel (sticky) ─────────────────────── -->
-    <section class="task-form-card" aria-label="Create new task">
-      <h2>Create New Task</h2>
+    <!-- Login form -->
+    <form id="loginForm" novalidate>
+      <div class="form-group">
+        <label for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" placeholder="you@blinkit.com" autocomplete="email" />
+      </div>
+      <div class="form-group" style="margin-top:0.75rem;">
+        <label for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div id="loginError" class="error-message" style="margin-top:0.5rem;display:none;"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:1.25rem;justify-content:center;">
+        Sign In
+      </button>
+    </form>
 
-      <form id="taskForm" novalidate>
-        <!-- Title -->
-        <div class="form-group">
-          <label for="taskTitle">Task Title *</label>
+    <!-- Register form (hidden by default) -->
+    <form id="registerForm" novalidate style="display:none;">
+      <div class="form-group">
+        <label for="regName">Full Name</label>
+        <input type="text" id="regName" placeholder="Rahul Sharma" autocomplete="name" />
+      </div>
+      <div class="form-group" style="margin-top:0.75rem;">
+        <label for="regEmail">Email</label>
+        <input type="email" id="regEmail" placeholder="you@blinkit.com" autocomplete="email" />
+      </div>
+      <div class="form-group" style="margin-top:0.75rem;">
+        <label for="regPassword">Password <small style="font-weight:400;">(min 6 chars)</small></label>
+        <input type="password" id="regPassword" placeholder="••••••••" autocomplete="new-password" />
+      </div>
+      <div id="registerError" class="error-message" style="margin-top:0.5rem;display:none;"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:1.25rem;justify-content:center;">
+        Create Account
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     APP VIEW  (main dashboard)
+══════════════════════════════════════════════════ -->
+<div id="appView">
+
+  <!-- Sticky Navbar -->
+  <nav class="navbar">
+    <div class="navbar-brand">
+      ⚡ TaskFlow <span>by Blinkit Ops</span>
+    </div>
+    <div class="navbar-right">
+      <button class="theme-toggle" id="themeToggle" title="Toggle dark/light mode">🌙</button>
+      <div class="user-chip">
+        <div class="user-avatar" id="userAvatar">U</div>
+        <span id="userNameDisplay">User</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn">Logout</button>
+    </div>
+  </nav>
+
+  <!-- App body: sidebar + content -->
+  <div class="app-body">
+
+    <!-- ── Sidebar ───────────────────────────────────────── -->
+    <aside class="sidebar" aria-label="Projects">
+      <div class="sidebar-label">Views</div>
+      <button class="sidebar-item active" id="sidebarAllTasks" data-filter="all">
+        <span class="item-icon">📋</span> All Tasks
+        <span class="sidebar-count" id="countAll">0</span>
+      </button>
+      <button class="sidebar-item" id="sidebarTodo" data-filter="todo">
+        <span class="item-icon">⬜</span> To Do
+        <span class="sidebar-count" id="countTodo">0</span>
+      </button>
+      <button class="sidebar-item" id="sidebarInProgress" data-filter="in_progress">
+        <span class="item-icon">🔄</span> In Progress
+        <span class="sidebar-count" id="countInProgress">0</span>
+      </button>
+      <button class="sidebar-item" id="sidebarDone" data-filter="done">
+        <span class="item-icon">✅</span> Done
+        <span class="sidebar-count" id="countDone">0</span>
+      </button>
+
+      <div class="sidebar-label">Projects</div>
+      <div id="projectList"><!-- rendered by JS --></div>
+
+      <!-- Add new project -->
+      <button class="sidebar-add-project" id="showProjectFormBtn">
+        ＋ New Project
+      </button>
+      <div id="projectFormInline" style="display:none;">
+        <div class="project-form">
+          <input type="text" id="newProjectName" placeholder="Project name…" />
+          <button class="btn btn-primary btn-sm" id="saveProjectBtn">Add</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Main Content ──────────────────────────────────── -->
+    <main class="main-content">
+
+      <!-- Stats bar -->
+      <div class="stats-bar" id="statsBar">
+        <div class="stat-card total">
+          <div class="stat-value" id="statTotal">0</div>
+          <div class="stat-label">Total Tasks</div>
+        </div>
+        <div class="stat-card done">
+          <div class="stat-value" id="statDone">0</div>
+          <div class="stat-label">Done</div>
+        </div>
+        <div class="stat-card inprog">
+          <div class="stat-value" id="statInProgress">0</div>
+          <div class="stat-label">In Progress</div>
+        </div>
+        <div class="stat-card high">
+          <div class="stat-value" id="statHigh">0</div>
+          <div class="stat-label">High Priority</div>
+        </div>
+      </div>
+
+      <!-- Create task card -->
+      <section class="create-card" aria-label="Create new task">
+        <h3>➕ Create Task</h3>
+        <form id="taskForm" novalidate>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="taskTitle">Task Title *</label>
+              <input type="text" id="taskTitle" placeholder="e.g. Review shelf inventory for Pod B" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="taskPriority">Priority</label>
+              <select id="taskPriority">
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="taskDueDate">Due Date</label>
+              <input type="text" id="taskDueDate" placeholder="2026-08-20 or next friday" />
+            </div>
+            <div class="form-group">
+              <label for="taskProjectId">Project</label>
+              <select id="taskProjectId">
+                <option value="1">Project #1</option>
+              </select>
+            </div>
+          </div>
+          <div id="taskFormError" class="error-message" style="display:none;"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">➕ Add Task</button>
+            <button type="button" id="quickAddBtn" class="btn btn-ghost">🤖 AI Quick-Add</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Toolbar: search + filters + sort -->
+      <div class="toolbar">
+        <div class="search-wrapper">
+          <span class="search-icon">🔍</span>
           <input
-            type="text"
-            id="taskTitle"
-            placeholder="e.g. Verify shelf inventory for Pod B"
-            autocomplete="off"
+            type="search"
+            class="search-input"
+            id="searchInput"
+            placeholder="Search tasks… (binary or linear)"
           />
-          <div id="titleError" class="error-message" role="alert" aria-live="polite" style="display:none;"></div>
         </div>
-
-        <!-- Priority / Due Date / Project -->
-        <div class="form-row">
-          <div class="form-group">
-            <label for="taskPriority">Priority</label>
-            <select id="taskPriority">
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="taskDueDate">Due Date / Hint</label>
-            <input
-              type="text"
-              id="taskDueDate"
-              placeholder="e.g. 2026-08-20 or next friday"
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="projectId">Project ID</label>
-            <input type="number" id="projectId" value="1" min="1" />
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="form-actions">
-          <button type="submit" id="submitBtn" class="btn btn-primary">
-            Add Task
-          </button>
-          <button type="button" id="quickAddBtn" class="btn btn-secondary">
-            AI Quick-Add
-          </button>
-        </div>
-      </form>
-    </section>
-
-    <!-- ── Task List ───────────────────────────────────────────────────── -->
-    <section class="task-list-section" aria-label="Active tasks">
-      <div class="list-header">
-        <h2>Active Tasks</h2>
-        <div class="sort-controls">
-          <button id="sortPriorityBtn" class="btn btn-small">
-            Sort by Priority
-          </button>
-          <button id="refreshBtn" class="btn btn-small">
-            Refresh
-          </button>
-        </div>
+        <select class="filter-select" id="algoSelect" title="Search algorithm">
+          <option value="binary">Binary Search</option>
+          <option value="linear">Linear Search</option>
+        </select>
+        <select class="filter-select" id="filterPriority" title="Filter by priority">
+          <option value="">All Priorities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="sortPriorityBtn">↕ Sort Priority</button>
+        <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Refresh</button>
       </div>
 
-      <!-- Status banner shown while fetching -->
-      <div id="statusBanner" class="status-banner" style="display:none;"></div>
+      <!-- Status banner -->
+      <div id="statusBanner" class="status-banner" style="display:none;" role="status"></div>
 
-      <div id="taskListContainer" class="task-list-container">
-        <!-- Rendered dynamically by app.js -->
+      <!-- Task list -->
+      <div>
+        <div class="task-list-header" style="margin-bottom:0.75rem;">
+          <h2 id="taskListTitle">All Tasks</h2>
+          <span class="task-count-badge" id="taskCountBadge">0 tasks</span>
+        </div>
+        <div class="task-list-container" id="taskListContainer"></div>
       </div>
-    </section>
 
-  </main>
+    </main>
+  </div><!-- /app-body -->
+</div><!-- /appView -->
 
-  <script src="app.js"></script>
+<!-- ══════════════════════════════════════════════════
+     EDIT TASK MODAL
+══════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="editModal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+  <div class="modal">
+    <h3 id="editModalTitle">✏️ Edit Task</h3>
+    <div class="form-group">
+      <label for="editTitle">Title</label>
+      <input type="text" id="editTitle" />
+    </div>
+    <div class="form-group" style="margin-top:0.75rem;">
+      <label for="editPriority">Priority</label>
+      <select id="editPriority">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-top:0.75rem;">
+      <label for="editStatus">Status</label>
+      <select id="editStatus">
+        <option value="todo">To Do</option>
+        <option value="in_progress">In Progress</option>
+        <option value="done">Done</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-top:0.75rem;">
+      <label for="editDueDate">Due Date</label>
+      <input type="text" id="editDueDate" placeholder="e.g. 2026-08-20" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="editCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="editSaveBtn">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
