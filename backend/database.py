@@ -1,16 +1,18 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# SQLite database file path
-SQLITE_DATABASE_URL = "sqlite:///./taskflow.db"
+# Always resolve to the project root's taskflow.db regardless of where uvicorn is launched from
+_HERE = os.path.dirname(os.path.abspath(__file__))          # backend/
+_ROOT = os.path.dirname(_HERE)                               # project root
+_DB_PATH = os.path.join(_ROOT, "taskflow.db")
 
-# create_engine with check_same_thread=False allows FastAPI multi-threading with SQLite
+SQLITE_DATABASE_URL = f"sqlite:///{_DB_PATH}"
+
 engine = create_engine(
     SQLITE_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 
-# SessionLocal factory creates new database sessions for requests
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base class for all ORM models to inherit from
 Base = declarative_base()

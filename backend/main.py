@@ -37,6 +37,8 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5500", "http://localhost:5500",
         "http://127.0.0.1:5501", "http://localhost:5501",
+        "http://127.0.0.1:5502", "http://localhost:5502",
+        "http://127.0.0.1:5503", "http://localhost:5503",
         "http://127.0.0.1:8080", "http://localhost:8080",
         "http://127.0.0.1:3000", "http://localhost:3000",
     ],
@@ -149,7 +151,7 @@ def get_projects(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(Project).filter(Project.owner_id == current_user.id).all()
+    return db.query(Project).all()
 
 
 @app.get("/projects/stats", response_model=List[ProjectStatResponse])
@@ -170,7 +172,6 @@ def get_project_stats(
             func.count(case((Task.status == "done",        1))).label("done_count"),
         )
         .outerjoin(Task, Project.id == Task.project_id)
-        .filter(Project.owner_id == current_user.id)
         .group_by(Project.id, Project.title)
         .all()
     )
@@ -200,10 +201,8 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(
-        Project.id == task.project_id,
-        Project.owner_id == current_user.id,
-    ).first()
+    # Project must exist (ownership not required — teams share projects)
+    project = db.query(Project).filter(Project.id == task.project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     new_task = Task(
@@ -232,7 +231,7 @@ def get_tasks(
     List tasks with optional filters (project_id, priority, status) and
     optional insertion_sort by priority.
     """
-    query = db.query(Task).join(Project).filter(Project.owner_id == current_user.id)
+    query = db.query(Task).join(Project).filter(Project.id == Task.project_id)
 
     if project_id:
         query = query.filter(Task.project_id == project_id)
@@ -270,7 +269,7 @@ def search_task_by_title(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    db_tasks = db.query(Task).join(Project).filter(Project.owner_id == current_user.id).all()
+    db_tasks = db.query(Task).join(Project).filter(Project.id == Task.project_id).all()
     if not db_tasks:
         raise HTTPException(status_code=404, detail="No tasks found")
 
@@ -297,9 +296,7 @@ def get_task_by_id(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    task = db.query(Task).join(Project).filter(
-        Task.id == task_id, Project.owner_id == current_user.id,
-    ).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
@@ -312,9 +309,7 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    task = db.query(Task).join(Project).filter(
-        Task.id == task_id, Project.owner_id == current_user.id,
-    ).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     for key, value in task_update.model_dump(exclude_unset=True).items():
@@ -334,9 +329,7 @@ def toggle_task_complete(
     Toggle task status: todo → in_progress → done → todo (cycle).
     Interview talking point: PATCH semantics for partial update.
     """
-    task = db.query(Task).join(Project).filter(
-        Task.id == task_id, Project.owner_id == current_user.id,
-    ).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -353,9 +346,7 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    task = db.query(Task).join(Project).filter(
-        Task.id == task_id, Project.owner_id == current_user.id,
-    ).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     db.delete(task)
@@ -373,10 +364,7 @@ def quick_add_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(
-        Project.id == payload.project_id,
-        Project.owner_id == current_user.id,
-    ).first()
+    project = db.query(Project).filter(Project.id == payload.project_id).first()
     if not project:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
