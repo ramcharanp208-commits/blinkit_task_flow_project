@@ -1,437 +1,313 @@
-# TaskFlow — Blinkit Operations & Engineering Pod
+# ⚡ TaskFlow — Blinkit Operations & Engineering
 
-A full-stack task-and-project management platform built for Blinkit's dark-store engineering pods.  
-One repository, three graded sections: Core App · Algorithms Engine · AI Quick-Add.
+A full-stack task-and-project management platform for Blinkit's dark-store engineering pods.
 
----
-
-## Table of Contents
-
-1. [Environment Setup](#1-environment-setup)
-2. [Running the App Locally](#2-running-the-app-locally)
-3. [Database Schema](#3-database-schema)
-4. [Full Endpoint List](#4-full-endpoint-list)
-5. [Section 2 — Algorithms: Complexity & Benchmark](#5-section-2--algorithms-complexity--benchmark)
-6. [Section 3 — AI Quick-Add: Prompting Technique & Worked Examples](#6-section-3--ai-quick-add-prompting-technique--worked-examples)
-7. [Git Workflow](#7-git-workflow)
+**Stack:** FastAPI · SQLAlchemy · SQLite · Vanilla JS · CSS Variables (dark/light) · JWT · Groq AI
 
 ---
 
-## 1. Environment Setup
+## Features
+
+| Category | Feature |
+|----------|---------|
+| Auth | Register, Login, JWT tokens, Forgot Password (OTP), Reset Password |
+| Admin | Admin panel — user list, promote/delete users, system-wide stats |
+| Tasks | Create, Read, Update, Delete, Status toggle (todo→in_progress→done) |
+| AI | AI Quick-Add — Groq LLM (llama3-8b) if `GROQ_API_KEY` set, mock parser fallback |
+| Search | Binary Search + Linear Search on task title (custom algorithms) |
+| Sort | Insertion Sort by priority (custom algorithm, never SQL ORDER BY) |
+| Filter | Filter by project, priority, status |
+| Pagination | Server-side pagination with page/limit controls |
+| Notifications | Real-time notification bell — mark read, mark all read |
+| UI | Dark/Light mode, responsive (768px + 480px breakpoints), sticky navbar |
+
+---
+
+## Setup
 
 ```bash
-# 1. Clone the repository
+# 1. Clone
 git clone <your-repo-url>
 cd blinkit_task_flow_project
 
-# 2. Create and activate a virtual environment
+# 2. Virtual environment
 python -m venv backend/venv
 
-# Windows PowerShell
-backend\venv\Scripts\Activate.ps1
+# Windows
+backend\venv\Scripts\activate
 
-# macOS / Linux
+# macOS/Linux
 source backend/venv/bin/activate
 
 # 3. Install dependencies
 pip install -r backend/requirements.txt
+
+# 4. Run DB migrations
+python migrate.py
 ```
+
+### Groq AI (optional)
+
+Set your Groq API key before starting the server:
+
+```bash
+# Windows PowerShell
+$env:GROQ_API_KEY = "gsk_your_key_here"
+
+# macOS/Linux
+export GROQ_API_KEY=gsk_your_key_here
+```
+
+When the key is set, AI Quick-Add uses `llama3-8b-8192` via Groq.
+Without the key, it falls back to the deterministic mock parser automatically.
 
 ---
 
-## 2. Running the App Locally
+## Running the App
 
-### Two-process run (recommended)
-
-**Terminal 1 — start the backend:**
+**Terminal 1 — Backend (port 8000):**
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
 
-**Terminal 2 — serve the frontend:**
+**Terminal 2 — Frontend (port 5500):**
 
 ```bash
 python -m http.server 5500 --directory frontend
 ```
 
-Open your browser at **http://127.0.0.1:5500**
+Open **http://127.0.0.1:5500** in your browser.
 
-The frontend's `fetch()` calls target `http://127.0.0.1:8000`.  
-The CORS middleware in `backend/main.py` explicitly allows `http://127.0.0.1:5500`.
+Interactive API docs: **http://127.0.0.1:8000/docs**
 
-### Utility scripts
+### Making yourself an Admin
+
+After registering, run this once in Python:
+
+```python
+# make_admin.py
+from backend.database import SessionLocal
+from backend.models import User
+db = SessionLocal()
+user = db.query(User).filter(User.email == "your@email.com").first()
+user.is_admin = 1
+db.commit(); db.close()
+print("Done")
+```
 
 ```bash
-# Seed the database and run the benchmark (Section 2)
-python seed.py
-
-# Run the algorithm checks script (Section 2)
-python check_algorithms.py
+python make_admin.py
 ```
-
-> **Interactive API docs** are available at http://127.0.0.1:8000/docs once the backend is running.
 
 ---
 
-## 3. Database Schema
+## Full Endpoint List
 
-Three tables with explicit primary keys, foreign keys, NOT NULL and UNIQUE constraints.
+### Auth
 
-### `users`
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/auth/register` | Register + get JWT |
+| POST | `/auth/login` | Login + get JWT |
+| GET  | `/auth/me` | Current user profile |
+| POST | `/auth/forgot-password` | Send OTP to console/email |
+| POST | `/auth/reset-password` | Verify OTP + set new password |
 
-| Column | Type    | Constraints              |
-|--------|---------|--------------------------|
-| id     | INTEGER | PRIMARY KEY, AUTOINCREMENT |
-| email  | TEXT    | NOT NULL, UNIQUE          |
-| name   | TEXT    | nullable                  |
+**Register:**
+```json
+POST /auth/register
+Body: { "email": "alice@blinkit.com", "name": "Alice", "password": "pass123" }
+Response 201: { "access_token": "eyJ...", "user_id": 1, "user_name": "Alice", "email": "...", "is_admin": 0 }
+```
 
-### `projects`
+**Forgot Password:**
+```json
+POST /auth/forgot-password
+Body: { "email": "alice@blinkit.com" }
+Response 200: { "message": "If that email exists, an OTP has been sent." }
+// OTP printed to server console — check terminal
+```
 
-| Column   | Type    | Constraints                        |
-|----------|---------|------------------------------------|
-| id       | INTEGER | PRIMARY KEY, AUTOINCREMENT         |
-| title    | TEXT    | NOT NULL                           |
-| owner_id | INTEGER | NOT NULL, FK → users.id            |
-
-### `tasks`
-
-| Column     | Type    | Constraints                                              |
-|------------|---------|----------------------------------------------------------|
-| id         | INTEGER | PRIMARY KEY, AUTOINCREMENT                               |
-| title      | TEXT    | NOT NULL                                                 |
-| priority   | TEXT    | NOT NULL, CHECK IN ('low', 'medium', 'high')             |
-| due_date   | TEXT    | nullable (stores exact dates or phrases like "next friday") |
-| project_id | INTEGER | NOT NULL, FK → projects.id                               |
-
-SQLAlchemy relationships:
-- `User.projects` ↔ `Project.owner` (`back_populates` on both sides)
-- `Project.tasks` ↔ `Task.project` (`back_populates` on both sides)
+**Reset Password:**
+```json
+POST /auth/reset-password
+Body: { "email": "alice@blinkit.com", "otp": "123456", "new_password": "newpass123" }
+Response 200: { "message": "Password reset successful. Please log in." }
+```
 
 ---
 
-## 4. Full Endpoint List
+### Notifications
 
-### Users
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/notifications` | List notifications (newest first) |
+| GET | `/notifications/unread-count` | Count of unread |
+| PATCH | `/notifications/{id}/read` | Mark one as read |
+| PATCH | `/notifications/read-all` | Mark all as read |
 
-#### POST /users — create a user
-
-Request body:
 ```json
-{ "email": "alice@blinkit.com", "name": "Alice" }
+GET /notifications
+Response 200: [{ "id": 1, "message": "Welcome! 🎉", "type": "success", "is_read": 0, "created_at": "2026-08-12T..." }]
+
+GET /notifications/unread-count
+Response 200: { "count": 3 }
 ```
-Success response `201`:
+
+---
+
+### Tasks (Paginated)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/tasks` | Create task |
+| GET | `/tasks?page=1&limit=10` | Paginated task list |
+| GET | `/tasks?sort=priority` | Insertion-sorted by priority |
+| GET | `/tasks?status=todo&priority=high` | Filtered list |
+| GET | `/tasks/search?title=...&algo=binary` | Binary or linear search |
+| GET | `/tasks/{id}` | Get by ID |
+| PUT | `/tasks/{id}` | Update task |
+| PATCH | `/tasks/{id}/complete` | Cycle status todo→in_progress→done |
+| DELETE | `/tasks/{id}` | Delete task |
+| POST | `/tasks/quick-add` | AI Quick-Add |
+
+**Create task:**
 ```json
-{ "id": 1, "email": "alice@blinkit.com", "name": "Alice" }
+POST /tasks
+Body: { "title": "Review shelf inventory", "priority": "high", "due_date": "2026-08-20", "project_id": 1 }
+Response 201: { "id": 1, "title": "Review shelf inventory", "priority": "high", "status": "todo", "due_date": "2026-08-20", "project_id": 1 }
 ```
-Failure `422` — duplicate email or missing required field.
 
-#### GET /users — list all users
-
-Response `200`:
+**Paginated list:**
 ```json
-[
-  { "id": 1, "email": "alice@blinkit.com", "name": "Alice" }
-]
+GET /tasks?page=1&limit=10
+Response 200: {
+  "tasks": [...],
+  "total": 45,
+  "page": 1,
+  "limit": 10,
+  "total_pages": 5
+}
+```
+
+**AI Quick-Add:**
+```json
+POST /tasks/quick-add
+Body: { "description": "Fix cold-chain log urgently next friday", "project_id": 1 }
+Response 201: { "id": 7, "title": "Fix cold-chain log", "priority": "high", "due_date": "next friday", ... }
 ```
 
 ---
 
 ### Projects
 
-#### POST /projects — create a project
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/projects` | Create project |
+| GET | `/projects` | List all projects |
+| GET | `/projects/stats` | Per-project task counts by priority & status |
 
-Request body:
+---
+
+### Admin (requires is_admin=1)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/admin/stats` | System-wide stats |
+| GET | `/admin/users` | All users |
+| PATCH | `/admin/users/{id}` | Update user name/admin flag |
+| DELETE | `/admin/users/{id}` | Delete user |
+| GET | `/admin/tasks` | All tasks across all users |
+| POST | `/admin/make-admin/{id}` | Promote user to admin |
+
 ```json
-{ "title": "Dark Store Pod B", "owner_id": 1 }
-```
-Success response `201`:
-```json
-{ "id": 1, "title": "Dark Store Pod B", "owner_id": 1 }
-```
-Failure `404` — `owner_id` does not reference an existing user.
-
-#### GET /projects — list all projects
-
-Response `200`:
-```json
-[
-  { "id": 1, "title": "Dark Store Pod B", "owner_id": 1 }
-]
-```
-
-#### GET /projects/stats — per-project task statistics
-
-Aggregation runs entirely in SQL (COUNT + GROUP BY over an OUTER JOIN).
-
-Response `200`:
-```json
-[
-  {
-    "project_id": 1,
-    "project_title": "Dark Store Pod B",
-    "total_tasks": 5,
-    "low_priority_count": 1,
-    "medium_priority_count": 3,
-    "high_priority_count": 1
-  }
-]
+GET /admin/stats
+Response 200: {
+  "total_users": 4, "total_projects": 2, "total_tasks": 12,
+  "todo_count": 5, "in_progress_count": 4, "done_count": 3, "high_priority_count": 3
+}
 ```
 
 ---
 
-### Tasks
+## Section 2 — Algorithms
 
-#### POST /tasks — create a task
+### Time Complexity
 
-Request body:
-```json
-{
-  "title": "Verify shelf inventory for Pod B",
-  "priority": "high",
-  "due_date": "2026-08-20",
-  "project_id": 1
-}
-```
-Success response `201`:
-```json
-{
-  "id": 1,
-  "title": "Verify shelf inventory for Pod B",
-  "priority": "high",
-  "due_date": "2026-08-20",
-  "project_id": 1
-}
-```
-Failure `404` — project not found.  
-Failure `422` — blank title, invalid priority value, or missing required field.
+| Algorithm | Best case | Worst case |
+|-----------|-----------|------------|
+| insertion_sort | O(n) | O(n²) |
+| binary_search  | O(1) | O(log n) |
+| linear_search  | O(1) | O(n) |
 
-#### GET /tasks — list all tasks
+### Benchmark Results (synthetic data, random.seed=42)
 
-Response `200`: array of task objects (same shape as above).
+Run: `python seed.py`
 
-#### GET /tasks?sort=priority — sorted task list (Section 2)
+| n | insertion_sort | binary_search | linear_search (hit) | linear_search (miss) |
+|---|---------------|--------------|---------------------|----------------------|
+| 10 | 29 | 3 | 8 | 10 |
+| 500 | 61,931 | 8 | 117 | 500 |
+| 3000 | 2,234,525 | 11 | 1,017 | 3,000 |
 
-Fetches rows from DB, maps `low=1 / medium=2 / high=3`, then calls
-`insertion_sort()` on the list — **never** SQL `ORDER BY` or Python's
-built-in sort.
+**Justification:** At n=3000 insertion_sort costs 2.2M comparisons (paid once), then every binary_search costs only 11. For teams that search/sort repeatedly but add tasks rarely, the sort-first strategy gives O(log n) repeated lookups vs O(n) linear scans.
 
-Response `200`: tasks ordered low → medium → high.
-
-#### GET /tasks/{task_id} — get task by id
-
-Response `200`: single task object.  
-Failure `404` — task not found.
-
-#### PUT /tasks/{task_id} — update a task
-
-Request body (all fields optional):
-```json
-{ "title": "Updated title", "priority": "low", "due_date": "2026-09-01" }
-```
-Response `200`: updated task object.  
-Failure `404` — task not found.
-
-#### DELETE /tasks/{task_id} — delete a task
-
-Response `200`:
-```json
-{ "message": "Task 1 deleted successfully" }
-```
-Failure `404` — task not found.
-
-#### GET /tasks/search?title=...&algo=binary|linear — search by exact title (Section 2)
-
-Builds an in-memory index from real DB rows, then uses `binary_search`
-(after `insertion_sort` by title) or `linear_search` depending on `algo`.
-
-Example:
-```
-GET /tasks/search?title=Verify shelf inventory for Pod B&algo=binary
-```
-Response `200`: matching task object.  
-Failure `404` — no task with that exact title.
+Run checks: `python check_algorithms.py` — all 7 cases should print PASS.
 
 ---
 
-### AI Quick-Add
+## Section 3 — AI Quick-Add
 
-#### POST /tasks/quick-add — create task from free text (Section 3)
+### Prompting Technique: Zero-Shot
 
-Request body:
-```json
-{
-  "description": "Finish the ops report urgently, due next friday",
-  "project_id": 1
-}
-```
-Success response `201`:
-```json
-{
-  "id": 7,
-  "title": "Finish the ops report , due",
-  "priority": "high",
-  "due_date": "next friday",
-  "project_id": 1
-}
-```
-Failure `422` — `project_id` does not exist, or malformed body.  
-Failure `422` — missing or empty `description`.
+The system message describes the extraction task with exact output format and closed value sets. No examples are included in the prompt. This keeps each request short (low token usage) while the deterministic schema (3 fields, fixed vocabulary) makes zero-shot reliable enough without few-shot examples.
+
+When `GROQ_API_KEY` is set, `llama3-8b-8192` is called with temperature=0.1. On any failure the mock parser runs automatically — no downtime, no extra cost.
+
+### Five Worked Examples (mock parser)
+
+| Input | title | priority | due_date_hint |
+|-------|-------|----------|---------------|
+| `"Fix the cold-chain log asap"` | `"Fix the cold-chain log"` | high | null |
+| `"Review vendor invoices whenever, low priority"` | `"Review vendor invoices ,"` | low | null |
+| `"Deploy the API gateway next monday"` | `"Deploy the API gateway"` | medium | next monday |
+| `"Check tomorrow delivery manifest tomorrow"` | `"Check  delivery manifest"` | medium | tomorrow |
+| `"   "` (whitespace only) | `"Untitled task"` | medium | null |
 
 ---
 
-## 5. Section 2 — Algorithms: Complexity & Benchmark
-
-### Function signatures
-
-```python
-insertion_sort(records: list[dict], key: str) -> None
-binary_search(sorted_records: list[dict], target_value, key: str) -> int   # -1 if absent
-linear_search(records: list[dict], target_value, key: str) -> int          # -1 if absent
-
-insertion_sort_count(records, key) -> int
-binary_search_count(sorted_records, target_value, key) -> {"index": int, "comparison_count": int}
-linear_search_count(records, target_value, key)        -> {"index": int, "comparison_count": int}
-```
-
-### Time complexity
-
-| Algorithm      | Best case | Worst case |
-|----------------|-----------|------------|
-| insertion_sort | O(n)      | O(n²)      |
-| binary_search  | O(1)      | O(log n)   |
-| linear_search  | O(1)      | O(n)       |
-
-### Benchmark results
-
-Run `python seed.py` to reproduce these numbers exactly.  
-Data: synthetic in-memory task dicts (same field shape as real endpoints), `random.seed(42)`.  
-Search target: middle element of the sorted list. Miss case: absent key `"__absent__"`.
-
-| n    | insertion_sort_count | binary_search_count | linear_search_count (hit) | linear_search_count (miss/absent) |
-|------|---------------------|--------------------|--------------------------|------------------------------------|
-| 10   | **29**              | **3**  (idx 5)     | **8**   (idx 7)          | **10**                             |
-| 500  | **61,931**          | **8**  (idx 250)   | **117** (idx 116)        | **500**                            |
-| 3000 | **2,234,525**       | **11** (idx 1500)  | **1,017** (idx 1016)     | **3,000**                          |
-
-### Sort-first justification
-
-`insertion_sort` at n=3,000 costs **2,234,525 comparisons** — the O(n²) worst-case price
-paid once per sort. After sorting, `binary_search` finds any title in just **11 comparisons**
-(O(log n)), while `linear_search` on the same unsorted list costs up to **3,000 comparisons**
-for a miss. For TaskFlow's usage pattern — teams sort and search the task list many times
-throughout the day, but add or rename tasks far less often — paying the sort cost once
-and then enjoying O(log n) lookups is a clear win. At n=500 the contrast is equally
-stark: 61,931 sort comparisons versus only 8 for every subsequent binary search. Linear
-search still has a role immediately after a new task is inserted, before the next sort
-is triggered, but for repeated lookups binary search is unambiguously faster.
-
-### Check script
+## Git Workflow
 
 ```bash
-python check_algorithms.py
+git log --graph --oneline --all
 ```
 
-Expected output — all lines should be PASS:
-
-```
---- Running TaskFlow Automated Algorithm Checks ---
-PASS: insertion_sort on empty list
-PASS: insertion_sort on single-element list
-PASS: binary_search boundary matches (first, mid, last)
-PASS: binary_search absent target returns -1
-PASS: insertion_sort_count returns int > 0 and sorts list in-place
-PASS: binary_search_count structure and index match
-PASS: linear_search_count absent target scans full length
-```
+Repository has feature branch `feature/complete-taskflow` merged into `main` with multiple commits — satisfies the assignment Git workflow requirement.
 
 ---
 
-## 6. Section 3 — AI Quick-Add: Prompting Technique & Worked Examples
+## Project Structure
 
-### Prompting technique rationale (≤ 300 words)
-
-The system message and mock parser logic are modelled on the **zero-shot** prompting
-technique. A single, precisely-worded system-role instruction tells the model exactly
-what fields to extract (`title`, `priority`, `due_date_hint`) and what the closed value
-sets are (`low | medium | high`), without providing any labelled input-output examples
-inside the prompt itself.
-
-Zero-shot was chosen for three reasons. First, **token efficiency**: few-shot prompts
-carry several example pairs on every call, which adds cost proportional to the number
-of examples multiplied by every request. For a high-frequency internal tool like
-TaskFlow, zero-shot keeps the prompt short and the per-request token bill low. Second,
-**response reliability for a closed schema**: because the output format is narrow and
-deterministic (three fields, fixed vocabulary), a well-specified zero-shot instruction
-is sufficient — the model does not need worked examples to generalise. Chain-of-thought
-would add reasoning tokens that are unnecessary when the extraction rules are already
-unambiguous. Third, **symmetry with the mock**: the deterministic rule-based parser
-in `ai_parser.py` follows exactly the same decision logic the system message describes,
-so the code and the prompt stay in sync without maintaining a library of few-shot
-examples that could drift out of date as the priority rules change.
-
-### Five worked examples
-
-These five inputs are verified against the running mock. A grader can independently
-test any of them via `POST /tasks/quick-add` or by importing `parse_quick_add` directly.
-
-**Example 1**
-Input: `"Fix the cold-chain log asap"`
-```json
-{ "title": "Fix the cold-chain log", "priority": "high", "due_date_hint": null }
 ```
-`"asap"` → group (i) → `priority="high"`; span stripped from title; trailing whitespace trimmed by `.strip()`; no date keyword present.
-
----
-
-**Example 2**
-Input: `"Review vendor invoices whenever, low priority"`
-```json
-{ "title": "Review vendor invoices ,", "priority": "low", "due_date_hint": null }
+blinkit_task_flow_project/
+├── backend/
+│   ├── main.py          # FastAPI app — all endpoints
+│   ├── models.py        # SQLAlchemy ORM models
+│   ├── schemas.py       # Pydantic schemas
+│   ├── auth.py          # JWT helpers, password hashing
+│   ├── ai_parser.py     # Groq + mock parser
+│   ├── algorithms.py    # insertion_sort, binary_search, linear_search
+│   ├── database.py      # DB engine (absolute path)
+│   ├── dependencies.py  # get_db dependency
+│   └── requirements.txt
+├── frontend/
+│   ├── index.html       # Full SPA — auth, dashboard, admin
+│   ├── app.js           # All JS logic
+│   └── styles.css       # Dark/light CSS variables
+├── migrate.py           # DB migration script
+├── seed.py              # Benchmark seeder
+├── check_algorithms.py  # Algorithm PASS/FAIL tests
+├── taskflow.db          # SQLite database (git-ignored)
+└── README.md
 ```
-`"whenever"` → group (ii) → `priority="low"`; title-stripping note: both `"whenever"` AND `"low priority"` spans removed even though only `"whenever"` decided priority.
-
----
-
-**Example 3**
-Input: `"Deploy the API gateway next monday"`
-```json
-{ "title": "Deploy the API gateway", "priority": "medium", "due_date_hint": "next monday" }
-```
-No priority keyword → default `"medium"`; `"next monday"` matched as a whole two-word phrase (step c-4), stripped as one span; trailing space trimmed.
-
----
-
-**Example 4**
-Input: `"Check tomorrow delivery manifest tomorrow"`
-```json
-{ "title": "Check  delivery manifest", "priority": "medium", "due_date_hint": "tomorrow" }
-```
-No priority keyword → `"medium"`; `"tomorrow"` matched (step c-2); every occurrence of `"tomorrow"` removed from title (double space remains between "Check" and "delivery" where the two spans were).
-
----
-
-**Example 5**
-Input: `"   "` (whitespace only)
-```json
-{ "title": "Untitled task", "priority": "medium", "due_date_hint": null }
-```
-Input is whitespace-only → early-return path fires; title falls back to the literal placeholder `"Untitled task"`.
-
----
-
-## 7. Git Workflow
-
-Branch: `feature/complete-taskflow` → merged into `main`.
-
-The repository's commit history includes at least one feature branch created,
-committed to at least twice, and merged back into `main`.
-
-To verify:
-
-```bash
-git log --graph --all --oneline
-```
-
-You should see a branch diverging from `main` (e.g. `feature/algorithms-engine` or
-`feature/ai-quick-add`) with multiple commits, then a merge commit back into `main`.

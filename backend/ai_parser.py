@@ -1,110 +1,165 @@
+"""
+ai_parser.py — TaskFlow AI Quick-Add parser
+============================================
+Two modes:
+  1. MOCK (default, zero API calls) — deterministic rule-based parser.
+  2. GROQ  (optional, set GROQ_API_KEY env var) — real LLM via Groq API.
+     Model: llama3-8b-8192  (fast, free-tier friendly)
+
+The endpoint falls back to MOCK automatically if:
+  - GROQ_API_KEY is not set
+  - Groq API call fails for any reason
+"""
+
+import os
 import re
+import json
+import logging
 from typing import Dict, Any, Optional
 
+logger = logging.getLogger("taskflow.ai_parser")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — REQUIRED MOCK PARSER  (always used when Groq is unavailable)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_quick_add(description: str) -> Dict[str, Any]:
     """
-    Deterministic rule-based mock parser following Section 3 Task 3 requirements:
-    a. Lower-cased copy for keyword matching; original string kept for title derivation.
-    b. Priority: 'urgent'/'asap' -> 'high', 'whenever'/'low priority' -> 'low', default -> 'medium'.
-    c. Due-date hint: strict priority sequence check (today, tomorrow, next week, next <weekday>, bare weekdays).
-    d. Title derivation: strips all matched priority & date spans from original-cased description.
+    Deterministic rule-based mock parser.
+    Returns: { title, priority, due_date_hint }
     """
     if not description or not description.strip():
-        return {
-            "title": "Untitled task",
-            "priority": "medium",
-            "due_date_hint": None
-        }
+        return {"title": "Untitled task", "priority": "medium", "due_date_hint": None}
 
-    lower_text = description.lower()
+    lower = description.lower()
 
-    # ---------------------------------------------------------
-    # STEP B: PRIORITY DETECTION & KEYWORD SPAN TRACKING
-    # ---------------------------------------------------------
-    priority_high_keywords = ["urgent", "asap"]
-    priority_low_keywords = ["whenever", "low priority"]
+    # ── STEP B: Priority ──────────────────────────────────────────────────────
+    high_kws = ["urgent", "asap"]
+    low_kws  = ["whenever", "low priority"]
 
-    has_high = any(kw in lower_text for kw in priority_high_keywords)
-    has_low = any(kw in lower_text for kw in priority_low_keywords)
+    has_high = any(kw in lower for kw in high_kws)
+    has_low  = any(kw in lower for kw in low_kws)
+    priority = "high" if has_high else ("low" if has_low else "medium")
 
-    if has_high:
-        priority = "high"
-    elif has_low:
-        priority = "low"
-    else:
-        priority = "medium"
+    # Collect spans to strip from title
+    priority_spans = []
+    for kw in (high_kws + low_kws):
+        for m in re.finditer(re.escape(kw), lower):
+            priority_spans.append((m.start(), m.end()))
 
-    # Collect ALL priority spans for stripping (Title-stripping note in step b)
-    all_priority_keywords = priority_high_keywords + priority_low_keywords
-    matched_priority_spans = []
-    for kw in all_priority_keywords:
-        for match in re.finditer(re.escape(kw), lower_text):
-            matched_priority_spans.append((match.start(), match.end()))
+    # ── STEP C: Due-date hint ─────────────────────────────────────────────────
+    weekdays = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+    date_checks = (
+        ["today", "tomorrow", "next week"]
+        + [f"next {d}" for d in weekdays]
+        + weekdays
+    )
 
-    # ---------------------------------------------------------
-    # STEP C: DUE-DATE HINT DETECTION
-    # ---------------------------------------------------------
     due_date_hint: Optional[str] = None
-    matched_date_spans = []
+    date_spans: list = []
 
-    # Sequence 1-3: Fixed date phrases
-    fixed_date_phrases = ["today", "tomorrow", "next week"]
-    
-    # Sequence 4: Two-word 'next <weekday>' phrases (Monday to Sunday order)
-    weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    next_weekday_phrases = [f"next {day}" for day in weekdays]
-    
-    # Sequence 5: Bare day names (Monday to Sunday order)
-    bare_weekday_phrases = weekdays
+    for kw in date_checks:
+        if kw in lower:
+            due_date_hint = kw
+            for m in re.finditer(re.escape(kw), lower):
+                date_spans.append((m.start(), m.end()))
+            break
 
-    all_date_checks = fixed_date_phrases + next_weekday_phrases + bare_weekday_phrases
+    # ── STEP D: Title derivation ──────────────────────────────────────────────
+    all_spans = sorted(priority_spans + date_spans, key=lambda x: x[0])
+    # merge overlapping spans
+    merged: list = []
+    for span in all_spans:
+        if merged and span[0] <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], span[1]))
+        else:
+            merged.append(list(span))
 
-    for date_kw in all_date_checks:
-        if date_kw in lower_text:
-            due_date_hint = date_kw
-            # Collect all occurrences of the matched phrase
-            for match in re.finditer(re.escape(date_kw), lower_text):
-                matched_date_spans.append((match.start(), match.end()))
-            break  # Stop at first matching keyword/phrase
-
-    # ---------------------------------------------------------
-    # STEP D: TITLE DERIVATION & STRIPPING
-    # ---------------------------------------------------------
-    all_spans_to_remove = matched_priority_spans + matched_date_spans
-
-    if not all_spans_to_remove:
-        derived_title = description.strip()
+    if not merged:
+        title = description.strip()
     else:
-        # Merge overlapping or contiguous spans
-        all_spans_to_remove.sort(key=lambda x: x[0])
-        merged_spans = []
-        for span in all_spans_to_remove:
-            if not merged_spans:
-                merged_spans.append(span)
-            else:
-                prev_start, prev_end = merged_spans[-1]
-                if span[0] <= prev_end:
-                    merged_spans[-1] = (prev_start, max(prev_end, span[1]))
-                else:
-                    merged_spans.append(span)
+        parts, last = [], 0
+        for s, e in merged:
+            parts.append(description[last:s])
+            last = e
+        parts.append(description[last:])
+        title = "".join(parts).strip()
 
-        # Build clean title from original-cased description by omitting matched spans
-        title_chars = []
-        last_idx = 0
-        for start, end in merged_spans:
-            title_chars.append(description[last_idx:start])
-            last_idx = end
-        title_chars.append(description[last_idx:])
+    if not title:
+        title = "Untitled task"
 
-        derived_title = "".join(title_chars).strip()
+    return {"title": title, "priority": priority, "due_date_hint": due_date_hint}
 
-    # Fallback to literal placeholder if derived title is empty or whitespace-only
-    if not derived_title:
-        derived_title = "Untitled task"
 
-    return {
-        "title": derived_title,
-        "priority": priority,
-        "due_date_hint": due_date_hint
-    }
+# ══════════════════════════════════════════════════════════════════════════════
+# GROQ REAL-LLM PARSER  (optional — activated by GROQ_API_KEY env var)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_with_groq(description: str) -> Optional[Dict[str, Any]]:
+    """
+    Calls Groq API (llama3-8b-8192) to extract task fields.
+    Returns parsed dict or None on any failure.
+    """
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        from groq import Groq  # imported lazily so missing package won't break mock mode
+        client = Groq(api_key=api_key)
+
+        system_msg = (
+            "You are a task-extraction assistant. "
+            "Given a plain-English task description, extract three fields and return ONLY valid JSON:\n"
+            '  {"title": "<string>", "priority": "low"|"medium"|"high", "due_date_hint": "<string or null>"}\n'
+            "Rules:\n"
+            "- title: cleaned task title, no priority/date keywords.\n"
+            "- priority: 'high' if urgent/asap, 'low' if whenever/low priority, else 'medium'.\n"
+            "- due_date_hint: exact date phrase (today/tomorrow/next friday/etc.) or null.\n"
+            "Return ONLY the JSON object, no markdown, no explanation."
+        )
+
+        chat = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user",   "content": description},
+            ],
+            temperature=0.1,
+            max_tokens=120,
+        )
+
+        raw = chat.choices[0].message.content.strip()
+        # Strip markdown code fences if model wraps response
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
+        parsed = json.loads(raw)
+
+        title    = str(parsed.get("title", "") or "").strip() or "Untitled task"
+        priority = parsed.get("priority", "medium")
+        if priority not in ("low", "medium", "high"):
+            priority = "medium"
+        due_date_hint = parsed.get("due_date_hint") or None
+
+        logger.info("Groq parsed: title=%r priority=%s due=%s", title, priority, due_date_hint)
+        return {"title": title, "priority": priority, "due_date_hint": due_date_hint}
+
+    except Exception as exc:
+        logger.warning("Groq parse failed (%s), falling back to mock.", exc)
+        return None
+
+
+def parse_task_description(description: str) -> Dict[str, Any]:
+    """
+    Public entry point used by the /tasks/quick-add endpoint.
+    Tries Groq first; falls back to mock parser automatically.
+    Returns dict with keys: title, priority, due_date_hint, used_ai (bool)
+    """
+    groq_result = _parse_with_groq(description)
+    if groq_result:
+        groq_result["used_ai"] = True
+        return groq_result
+
+    mock_result = parse_quick_add(description)
+    mock_result["used_ai"] = False
+    return mock_result
